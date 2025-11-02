@@ -1,22 +1,18 @@
 import pandas as pd
 import numpy as np
 
-def percent_rows_not_meeting_conditions(df, conditions):
+def negative_values_report(df, cols=None, only_numeric=True):
     """
-    Takes a DataFrame and a list of conditions (as strings, e.g. "col >= 0"),
-    checks each row for each condition, and outputs the percentage of rows that do NOT meet all conditions.
-
-    Args:
-        df: pandas DataFrame
-        conditions: list of strings, each a valid pandas query condition (e.g. ["A >= 0", "B <= 100"])
-
-    Returns:
-        float: percentage of rows not meeting all conditions
+    Return a DataFrame with count and percentage of negative values per column.
+    - cols: list of columns to check (default: all numeric columns if only_numeric=True,
+            otherwise all columns).
+    - only_numeric: if True (default) only numeric dtypes are checked when cols is None.
     """
-    # Combine all conditions with '&' for pandas query
-    combined = " & ".join(conditions)
-    # Rows that meet all conditions
-    meets = df.query(combined)
-    pct_not_meeting = 100 * (1 - len(meets) / len(df))
-    print(f"Percentage of rows NOT meeting all conditions: {pct_not_meeting:.2f}%")
-    return pct_not_meeting
+    if cols is None:
+        cols = df.select_dtypes(include='number').columns.tolist() if only_numeric else df.columns.tolist()
+
+    neg_counts = (df[cols] < 0).sum()
+    neg_pct = neg_counts / len(df) * 100
+    report = pd.concat([neg_counts, neg_pct], axis=1, keys=['neg_count', 'neg_pct'])
+    report = report.loc[report['neg_count'] > 0].sort_values('neg_pct', ascending=False)
+    return report
