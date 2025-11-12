@@ -52,8 +52,6 @@ def plot_numeric_distributions(df, out_path="outputs/numeric_distributions.png",
         plt.show()
     plt.close(fig)
 
-
-
 def plot_categorical_value_counts(df, out_path="outputs/categorical_value_counts.png", cols=4, top_n=10, figsize_per_plot=(4, 3), save=False, show=True):
     """
     Plot bar charts of value counts for all non-numeric (categorical/object) columns in the input dataframe.
@@ -103,3 +101,14 @@ def plot_categorical_value_counts(df, out_path="outputs/categorical_value_counts
     if show:
         plt.show()
     plt.close(fig)
+
+def plot_elbow_graph(dispersion:list):
+    '''
+    Function to plot elbow graphs given a dispersion list
+    '''
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(1, 20), dispersion, marker='o')
+    plt.xticks(range(1, 21, 1))
+    plt.xlabel('Number of clusters')
+    plt.ylabel('Dispersion')
+    plt.show()
