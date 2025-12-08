@@ -1,255 +1,175 @@
 # Functions to apply clustering algs
 import numpy as np
 import pandas as pd
-import random
 from sklearn.cluster import KMeans
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import AgglomerativeClustering
-from sklearn.mixture import GaussianMixture
 from sklearn.metrics import silhouette_score
-import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
-import seaborn as sns
+import itertools
 
 
 def apply_kmeans(data, n_clusters=3):
-    model = KMeans(n_clusters=n_clusters, random_state=42)
+    '''
+    Function to apply KMeans clustering
+    Input:
+    - data: dataframe of features
+    - n_clusters: number of clusters to form
+
+    Output:
+    - labels: cluster labels for each data point
+    - model: fitted KMeans model
+    '''
+    model = KMeans(n_clusters=n_clusters, random_state=1)
     labels = model.fit_predict(data)
     return labels, model
 
 def apply_dbscan(data, eps=0.5, min_samples=5):
+    '''
+    Function to apply DBSCAN clustering
+    Input:
+    - data: dataframe of features
+    - eps: distance threshold
+    - min_samples: sample count threshold
+
+    Output:
+    - labels: cluster labels for each data point
+    - model: fitted DBSCAN model
+    '''
     model = DBSCAN(eps=eps, min_samples=min_samples)
     labels = model.fit_predict(data)
     return labels, model
 
 def apply_agglomerative(data, n_clusters=3, linkage='ward'):
+    '''
+    Function to apply Agglomerative Clustering
+    Input:
+    - data: dataframe of features
+    - n_clusters: number of clusters to form
+    - linkage: linkage criterion
+
+    Output:
+    - labels: cluster labels for each data point
+    - model: fitted AgglomerativeClustering model
+    '''
     model = AgglomerativeClustering(n_clusters=n_clusters, linkage=linkage)
     labels = model.fit_predict(data)
     return labels, model
 
-def apply_gmm(data, n_components=3):
-    model = GaussianMixture(n_components=n_components, random_state=42)
-    labels = model.fit_predict(data)
-    return labels, model
-
 def evaluate_clustering(data, labels):
+    '''
+    Function to evaluate clustering using silhouette score
+    Input:
+    - data: dataframe of features
+    - labels: cluster labels for each data point
+    Output:
+    - score: silhouette score (None if invalid)
+    '''
     if len(set(labels)) > 1 and -1 not in set(labels):  # Avoid invalid silhouette cases
         score = silhouette_score(data, labels)
         return score
     return None
 
-def compare_clustering_algorithms(data, algorithms, plot=True):
+def optimize_demographic(X, ids,
+                            k_values=range(2,11),
+                            linkage_options=('ward','average','complete','single'),
+                            random_state=1,
+                            verbose=False):
     '''
-    Compare clustering algorithms on the same dataset.
-    
-    Parameters:
-    - data: ndarray, preprocessed input data
-    - algorithms: dict, keys are names, values are functions returning (labels, model)
-    - plot: bool, whether to show 2D scatter plots
-    
-    Returns:
-    - results: dict of {algorithm_name: silhouette_score}
-    '''
-    results = {}
-    for name, cluster_func in algorithms.items():
-        try:
-            labels, model = cluster_func(data)
-            if len(set(labels)) > 1 and -1 not in set(labels):
-                score = silhouette_score(data, labels)
-            else:
-                score = None
-            results[name] = score
-
-            if plot:
-                plt.figure(figsize=(5, 4))
-                plt.scatter(data[:, 0], data[:, 1], c=labels, cmap='tab10', s=40)
-                plt.title(f'{name} (Silhouette: {score:.2f})' if score else f'{name} (Invalid Score)')
-                plt.grid(True)
-                plt.tight_layout()
-                plt.show()
-        except Exception as e:
-            print(f"Error with {name}: {e}")
-            results[name] = None
-    return results
-
-# Optimization ----------------------------------------------------------------------------------
-
-def genetic_clustering_optimizer(df, method='kmeans', generations=10, population_size=6,
-                                  cluster_range=(2, 10), dbscan_grid=None,
-                                  pca_range=(None, 2, 3), visualize=False):
-    '''
-    Genetic algorithm to optimize clustering with multiple parameters.
-
-    Inputs:
-    - df: df with scaled features; first column must be ID_Client
-    - method: clustering method ('kmeans', 'gmm', 'agglomerative', 'dbscan')
-    - generations: number of iterations of the gen alg loop
-    - population_size: number of individuals per generation
-    - cluster_range: tuple (min_k, max_k) for k-based methods
-    - dbscan_grid: list of (eps, min_samples) tuples for DBSCAN
-    - pca_range: list of PCA component options (None = no PCA)
-    - visualize: whether to show final cluster plot
-
-    Output:
-    - best_result: dict with metadata and result_df (ID_Client + label)
-    '''
-    # Separate out the id column
-    feature_data = df.iloc[:, 1:].copy()
-    id_col = df.iloc[:, 0].reset_index(drop=True)
-
-    # Initialize population
-    if method == 'dbscan':
-        if dbscan_grid is None:
-            dbscan_grid = [(round(random.uniform(0.2, 1.0), 2), random.randint(3, 15)) for _ in range(population_size)]
-        population = dbscan_grid
-    else:
-        population = [{
-            'n_clusters': random.randint(*cluster_range),
-            'init': random.choice(['k-means++', 'random']),
-            'pca': random.choice(pca_range)
-        } for i in range(population_size)]
-
-    best_result = {'score': -1}
-
-    # Main gen alg loop
-    for gen in range(generations):
-        scores, models, labels_list = [], [], []
-
-        for individual in population:
-            try:
-                # Apply PCA if indicated
-                if method != 'dbscan':
-                    pca_components = individual['pca']
-                else:
-                    pca_components = random.choice(pca_range)
-
-                if pca_components is not None:
-                    pca = PCA(n_components=pca_components, random_state=42)
-                    data = pca.fit_transform(feature_data.values)
-                else:
-                    pca = None
-                    data = feature_data.values
-
-                # Apply clustering
-                if method == 'kmeans':
-                    labels, model = apply_kmeans(data, n_clusters=individual['n_clusters'], init=individual['init'])
-                elif method == 'gmm':
-                    labels, model = apply_gmm(data, n_components=individual['n_clusters'])
-                elif method == 'agglomerative':
-                    labels, model = apply_agglomerative(data, n_clusters=individual['n_clusters'])
-                elif method == 'dbscan':
-                    eps, min_samples = individual
-                    labels, model = apply_dbscan(data, eps=eps, min_samples=min_samples)
-                else:
-                    continue
-
-                # Evaluate
-                if len(set(labels)) > 1 and -1 not in set(labels):
-                    score = silhouette_score(data, labels)
-                    scores.append(score)
-                    models.append(model)
-                    labels_list.append(labels)
-
-                    if score > best_result['score']:
-                        best_result = {
-                            'method': method,
-                            'params': individual,
-                            'score': score,
-                            'labels': labels,
-                            'model': model,
-                            'pca': pca
-                        }
-                else:
-                    scores.append(-1)
-                    models.append(None)
-                    labels_list.append(None)
-            except:
-                scores.append(-1)
-                models.append(None)
-                labels_list.append(None)
-
-        # Select top 2 parents
-        top_indices = np.argsort(scores)[-2:]
-        parent1 = population[top_indices[0]]
-        parent2 = population[top_indices[1]]
-
-        # Crossover and mutation
-        if method == 'dbscan':
-            child1 = (parent2[0], parent1[1])
-            mutated_eps = round(min(1.5, max(0.1, parent1[0] + random.uniform(-0.1, 0.1))), 2)
-            child2 = (mutated_eps, parent1[1])
-        else:
-            # Crossover: blend n_clusters, swap init, average pca
-            child1 = {
-                'n_clusters': int((parent1['n_clusters'] + parent2['n_clusters']) / 2),
-                'init': random.choice([parent1['init'], parent2['init']]),
-                'pca': random.choice([parent1['pca'], parent2['pca']])
-            }
-            # Mutation: tweak n_clusters ±1, random init, random pca
-            mutation_k = parent1['n_clusters'] + random.choice([-1, 1])
-            mutation_k = max(cluster_range[0], min(cluster_range[1], mutation_k))
-            child2 = {
-                'n_clusters': mutation_k,
-                'init': random.choice(['k-means++', 'random']),
-                'pca': random.choice(pca_range)
-            }
-
-        # New population
-        population = [parent1, parent2, child1, child2] + [
-            random.choice(dbscan_grid) if method == 'dbscan' else {
-                'n_clusters': random.randint(*cluster_range),
-                'init': random.choice(['k-means++', 'random']),
-                'pca': random.choice(pca_range)
-            }
-            for _ in range(population_size - 4)
-        ]
-
-    # Final result df
-    result_df = pd.DataFrame({
-        'ID_Client': id_col,
-        'label': best_result['labels']
-    })
-    best_result['result_df'] = result_df
-
-    # Optional visualization with scatterplots
-    if visualize and best_result['labels'] is not None:
-        plot_data = best_result['pca'].transform(feature_data.values) if best_result['pca'] else feature_data.values
-        plt.figure(figsize=(6, 5))
-        plt.scatter(plot_data[:, 0], plot_data[:, 1], c=best_result['labels'], cmap='tab10', s=40)
-        plt.title(f"Genetic Optimized: {best_result['method']} ({best_result['params']})")
-        plt.grid(True)
-        plt.tight_layout()
-        plt.show()
-
-    return best_result
-
-def describe_clusters(data_clean, cluster_labels, show_boxplots=False):
-    '''
-    Summarizes each cluster by the mean of original variables
+    Function to optimize parameters for the demographic clustering task
 
     Input:
-    - data_clean: dataframe of original (unscaled) features
-    - cluster_labels: cluster assignments (output of genetic_clustering_optimizer)
-    - show_boxplots: whether to display boxplots per variable per cluster
-    
+    - X: dataframe of features
+    - ids: list of client IDs
+
     Output:
-    - summary_df: dataframe with mean values per cluster
+    - result_df: dataframe with columns ['id', 'label'] for the best configuration
+    - best_description: best model and hyperparameters
+    - best_score: silhouette score
+    - best_model: fitted sklearn-like model object
     '''
-    df = data_clean.copy()
-    df['Cluster'] = cluster_labels
-    summary_df = df.groupby('Cluster').mean().round(2)
+    X_arr = np.asarray(X)
+    best_score = None
+    best_labels = None
+    best_model = None
+    best_description = None
 
-    if show_boxplots:
-            num_vars = df.shape[1] - 1  # exclude 'Cluster'
-            fig, axes = plt.subplots(nrows=(num_vars + 1) // 2, ncols=2, figsize=(12, 4 * ((num_vars + 1) // 2)))
-            axes = axes.flatten()
+    # KMeans grid
+    for k in k_values:
+        labels, model = apply_kmeans(X_arr, n_clusters=int(k))
+        score = evaluate_clustering(X_arr, labels)
+        if score is None:
+            if verbose:
+                print(f"KMeans k={k} -> invalid (score None)")
+            continue
+        if (best_score is None) or (score > best_score):
+            best_score = score
+            best_labels = labels
+            best_model = model
+            best_description = f"KMeans n_clusters={k}"
 
-            for i, col in enumerate(df.columns[:-1]):  # skip 'Cluster'
-                sns.boxplot(x='Cluster', y=col, data=df, ax=axes[i], palette='Set2')
-                axes[i].set_title(f'{col} by Cluster')
-                axes[i].grid(True)
+    # Agglomerative grid
+    for k, linkage in itertools.product(k_values, linkage_options):
+        labels, model = apply_agglomerative(X_arr, n_clusters=int(k), linkage=linkage)
+        score = evaluate_clustering(X_arr, labels)
+        if score is None:
+            if verbose:
+                print(f"Agglomerative k={k} linkage={linkage} -> invalid (score None)")
+            continue
+        if (best_score is None) or (score > best_score):
+            best_score = score
+            best_labels = labels
+            best_model = model
+            best_description = f"Agglomerative n_clusters={k} linkage={linkage}"
 
-            plt.tight_layout()
-            plt.show()
+    if best_labels is None:
+        best_labels = np.full(X_arr.shape[0], -1, dtype=int)
+        best_model = None
+        best_description = None
 
-    return summary_df
+    result_df = pd.DataFrame({'id': np.asarray(ids), 'label': np.asarray(best_labels)})
+    return result_df, best_description, best_score, best_model
+
+def optimize_purchase(X, ids,
+                        eps_values=(0.1,0.2,0.3,0.5,0.8,1.0),
+                        min_samples_values=(3,5,7,10),
+                        metric='euclidean',
+                        verbose=False):
+    """
+    Function to optimize parameters for the demographic clustering task
+
+    Input:
+    - X: dataframe of features
+    - ids: list of client IDs
+
+    Output:
+    - result_df: dataframe with columns ['id', 'label'] for the best configuration
+    - best_description: best DBSCAN config
+    - best_score: silhouette score
+    - best_model: fitted DBSCAN instance
+    """
+    X_arr = np.asarray(X)
+    best_score = None
+    best_labels = None
+    best_model = None
+    best_description = None
+
+    for eps, min_s in itertools.product(eps_values, min_samples_values):
+        labels, model = apply_dbscan(X_arr, eps=float(eps), min_samples=int(min_s))
+        score = evaluate_clustering(X_arr, labels)
+        if score is None:
+            if verbose:
+                print(f"DBSCAN eps={eps} min_samples={min_s} -> invalid (score None)")
+            continue
+        if (best_score is None) or (score > best_score):
+            best_score = score
+            best_labels = labels
+            best_model = model
+            best_description = f"DBSCAN eps={eps} min_samples={min_s} metric={metric}"
+
+    if best_labels is None:
+        best_labels = np.full(X_arr.shape[0], -1, dtype=int)
+        best_model = None
+        best_description = None
+
+    result_df = pd.DataFrame({'id': np.asarray(ids), 'label': np.asarray(best_labels)})
+    return result_df, best_description, best_score, best_model

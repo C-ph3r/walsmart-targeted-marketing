@@ -3,6 +3,7 @@ import os, math
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import folium
 
 def plot_numeric_distributions(df, out_path="outputs/numeric_distributions.png", cols=4, bins=30, kde=True, figsize_per_plot=(4, 3), save=False, show=True):
     """
@@ -101,6 +102,36 @@ def plot_categorical_value_counts(df, out_path="outputs/categorical_value_counts
     if show:
         plt.show()
     plt.close(fig)
+
+def plot_world_map(df, lat_col='Latitude', lon_col='Longitude', zoom_start=2):
+    '''
+    Plots latitude and longitude points on a folium world map
+
+    Input:
+    - df: dataframe with latitude and longitude columns
+    - lat_col: name of the latitude column
+    - lon_col: name of the longitude column
+    - zoom_start: initial zoom level (2=global view)
+
+    Output:
+    - folium map object
+    '''
+    # Center map on mean coordinates
+    center_lat = df[lat_col].mean()
+    center_lon = df[lon_col].mean()
+
+    world_map = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_start)
+
+    for i, row in df.iterrows():
+        folium.CircleMarker(
+            location=[row[lat_col], row[lon_col]],
+            radius=4,
+            color='blue',
+            fill=True,
+            fill_opacity=0.6
+        ).add_to(world_map)
+
+    return world_map
 
 def plot_elbow_graph(dispersion:list):
     '''
