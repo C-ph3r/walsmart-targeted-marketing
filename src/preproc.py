@@ -1,119 +1,113 @@
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.impute import IterativeImputer
+from sklearn.impute import KNNImputer
+from sklearn.preprocessing import StandardScaler
 
-def negative_values_report(df, cols=None, only_numeric=True):
+def walsmart_preproc(raw_data: pd.DataFrame) -> pd.DataFrame:
     '''
-    Return a df with count and percentage of negative values per column.
-    - cols: list of columns to check (default: all numeric columns if only_numeric=True,
-            otherwise all columns).
-    - only_numeric: if T, only numeric dtypes are checked when cols is None.
+    Preprocess the WalSmart raw data according to the defined steps
+    
+    Input: raw_data - dataframe of raw WalSmart data
+    Output: preproc_data - dataframe of preprocessed WalSmart data
     '''
-    if cols is None:
-        cols = df.select_dtypes(include='number').columns.tolist() if only_numeric else df.columns.tolist()
+    preproc_data = raw_data.copy()
 
-    neg_counts = (df[cols] < 0).sum()
-    neg_pct = neg_counts / len(df) * 100
-    report = pd.concat([neg_counts, neg_pct], axis=1, keys=['neg_count', 'neg_pct'])
-    report = report.loc[report['neg_count'] > 0].sort_values('neg_pct', ascending=False)
-    return report
+    # 1. Remove rows with missing and duplicate ID_Client
+    preproc_data.dropna(subset=['ID_Client'], inplace=True)
+    preproc_data.drop_duplicates(subset=['ID_Client'], inplace=True)
 
-def clean_outliers(df, threshold=3, count_limit=1000, 
-                   numeric_only=True, imputer_max_iter=10):
+    # 2. Remove meaningless and unusable columns
+    preproc_data.drop(columns=['Potencial_Score', 'Latitude', 'Longitude', 
+                            'Credit_factor', 'Store_state', 'ID_Store_last',
+                            'Gender', 'Checked_ok'], 
+                        axis=1, inplace=True)
 
-    '''
-    For each numeric column:
-      - if outlier_count > count_limit: set those values to nan
-      - else: mark those rows for removal
-    After processing all columns:
-      - drop marked rows
-      - impute remaining NaNs in numeric columns using random forest
+    # 3. Treat simple negative values (replace with 0)
+    preproc_data['Longevity_months'] = preproc_data['Longevity_months'].apply(lambda x: max(x, 0))
+    preproc_data['Recency_in_weeks'] = preproc_data['Recency_in_weeks'].apply(lambda x: max(x, 0))
 
-    Returns cleaned_df and a small report dict.
-    '''
+    # 4. Process ZIP_Code into Missing, Top 3 encoded, Others
+    zip_s = preproc_data['ZIP_Code'].astype(str).str.strip()
+    is_missing = preproc_data['ZIP_Code'].isna() | (zip_s == '')
+    top3 = ['8', '0', '4']
 
-    dfc = df.copy()
-    numeric_cols = dfc.select_dtypes(include=[np.number]).columns.tolist() if numeric_only else dfc.columns.tolist()
+    preproc_data['ZIP_Missing'] = is_missing.astype(int)
+    for z in top3:
+        preproc_data[f'ZIP_{z}'] = ((~is_missing) & (zip_s == z)).astype(int)
+    preproc_data['ZIP_Others'] = ((~is_missing) & (~zip_s.isin(top3))).astype(int)
+    preproc_data.drop(columns=['ZIP_Code'], axis=1, inplace=True)
 
-    # set to track rows that should be dropped
-    to_drop_idx = set()
-    # dictionary to record columns where outliers were taken out
-    cols_set_to_nan = {}
+    # 5. Process Relevance_criteria into Relevance_Priority
+    preproc_data['Relevance_Priority'] = (preproc_data['Relevance_criteria'] == 'Priority').astype(int)
+    preproc_data.drop(columns=['Relevance_criteria'], axis=1, inplace=True)
 
-    # for each column to detect outliers from
-    for col in numeric_cols:
-        col_series = dfc[col]
+    # 6. Process Returns into Has_Returns
+    preproc_data['Has_Returns'] = (preproc_data['Returns'] > 0).astype(int)
+    preproc_data.drop(columns=['Returns'], axis=1, inplace=True)
 
-        # skip column if it's empty'
-        if col_series.dropna().empty:
-            continue
+    # 7. Process Flaged (convert to boolean: replace 2 with 1)
+    preproc_data['Flaged'] = preproc_data['Flaged'].replace(2, 1).astype(int)
 
-        # compute mean and std deviation for outlier detection
-        mean = col_series.mean()
-        std = col_series.std()
+    # 8. Process Promotional_percentage (trim to [0, 100] by clipping)
+    preproc_data['Promotional_percentage'] = preproc_data['Promotional_percentage'].clip(lower=0, upper=100)
 
-        # skip column if std is undefined or zero (no variation)
-        if pd.isna(std) or std == 0:
-            continue
+    # 9. Process Education into Education_Years
+    preproc_data['Education'] = preproc_data['Education'].fillna('').astype(str).str.strip()
 
-        # identify outliers using the threshold (by default 3 standard deviations from mean)
-        mask = (col_series > mean + threshold * std) | (col_series < mean - threshold * std)
-        out_idx = dfc.index[mask].tolist()
-        cnt = len(out_idx)
-
-        # skip column if no outliers are found
-        if cnt == 0:
-            continue
-
-        if cnt > count_limit:
-            # too many outliers: set them to nan for later imputation
-            dfc.loc[out_idx, col] = pd.NA
-            cols_set_to_nan[col] = cnt
-        else:
-            # few outliers: mark rows for removal
-            to_drop_idx.update(out_idx)
-
-    # drop small-number outlier rows
-    if to_drop_idx:
-        dfc = dfc.drop(index=list(to_drop_idx)).reset_index(drop=True)
-
-    # impute numeric columns if there are NaNs
-    numeric_cols_after = dfc.select_dtypes(include=[np.number]).columns.tolist()
-    if dfc[numeric_cols_after].isna().any().any():
-        estimator = RandomForestRegressor(n_estimators=100, random_state=0, n_jobs=-1)
-        imp = IterativeImputer(estimator=estimator, random_state=0, max_iter=imputer_max_iter, initial_strategy='median')
-        imputed = imp.fit_transform(dfc[numeric_cols_after])
-        dfc[numeric_cols_after] = imputed
-
-    report = {
-        'dropped_rows': len(to_drop_idx),
-        'cols_set_to_nan': cols_set_to_nan,
-        'final_shape': dfc.shape
+    education_mapping = {
+        '': 12,
+        'High School': 12,
+        'Degree': 15,
+        'Bachelor Degree': 15,
+        'MSc Degree': 17
     }
-    return dfc, report
+    preproc_data['Education_Years'] = preproc_data['Education'].map(education_mapping).fillna(12).astype(int)
+    preproc_data.drop(columns=['Education'], axis=1, inplace=True)
 
-def show_outliers(data, threshold=2):
+    # 10. Correct the datatype for Dairy
+    preproc_data["Dairy"] = pd.to_numeric(
+        preproc_data["Dairy"].astype(str).str.replace(",000", "", regex=False).str.strip())
+
+    # 11. Impute missing values for Frozen_Foods using KNN based on the product columns
+    product_cols = ['Beer', 'Bottled_Water', 'Bread', 'Meat', 'Dairy', 'Fresh_Foods',
+                'Fruit_Beverages', 'Pastry', 'Sodas', 'Toiletries', 'Veggies', 'Wines', 'Frozen_Foods']
+
+    imputer = KNNImputer(n_neighbors=5)
+    preproc_data[product_cols] = imputer.fit_transform(preproc_data[product_cols])
+
+    # 12. Add the variable Total_Profit
+    preproc_data['Total_Profit'] = preproc_data[product_cols].sum(axis=1)
+    
+    return preproc_data
+
+
+
+def walsmart_scaling(preproc_data:pd.DataFrame) -> pd.DataFrame:
     '''
-    Function to find outliers in each column of a df and print the number of outliers per column
+    Applies scaling and outlier treatment to the preprocessed WalSmart data
 
-    Input:
-    - data: DataFrame containing the data.
-    - threshold: Threshold for determining outliers, default is 2 standard deviations
-
-    Output:
-    - A dictionary containing the number of outliers for each column
+    Input: preproc_data - output of walsmart_preproc
+    Output: scaled_data - dataframe with treated columns and normalized for clustering
     '''
-    outlier_counts = {}
+    scaled_data = preproc_data.copy()
+    
+    # Define product columns
+    product_cols = ['Beer', 'Bottled_Water', 'Bread', 'Meat', 'Dairy', 'Fresh_Foods',
+                    'Fruit_Beverages', 'Pastry', 'Sodas', 'Toiletries', 'Veggies', 'Wines', 'Frozen_Foods']
 
-    for column in data.columns:
-        datacopy = data.copy()
-        mean = datacopy[column].mean()
-        std = datacopy[column].std()
-        outliers = datacopy[(datacopy[column] > mean + threshold * std) | (datacopy[column] < mean - threshold * std)]
-        outlier_counts[column] = len(outliers)
+    # 1. Product columns: Replace negative values with -1
+    # Keeps the "loss" indicator without affecting the distribution too much
+    for col in product_cols:
+        scaled_data[col] = scaled_data[col].where(scaled_data[col] >= 0, -1)
 
-    for column, count in outlier_counts.items():
-        print(f"Column '{column}' has {count} outliers.")
+    # 2. Product columns outliers: Windsorization at 99th percentile
+    for col in product_cols:
+        p99 = scaled_data[col].quantile(0.99)
+        scaled_data[col] = scaled_data[col].clip(upper=p99)
 
-    return outlier_counts
+    # 3. Scale all numeric columns for distance-based clustering
+    scaler = StandardScaler()
+    numeric_cols = scaled_data.select_dtypes(include=[np.number]).columns.tolist()
+    scaled_data[numeric_cols] = scaler.fit_transform(scaled_data[numeric_cols])
+
+    return scaled_data
