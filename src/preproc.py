@@ -93,7 +93,8 @@ def walsmart_scaling(preproc_data:pd.DataFrame) -> pd.DataFrame:
     
     # Define product columns
     product_cols = ['Beer', 'Bottled_Water', 'Bread', 'Meat', 'Dairy', 'Fresh_Foods',
-                    'Fruit_Beverages', 'Pastry', 'Sodas', 'Toiletries', 'Veggies', 'Wines', 'Frozen_Foods']
+                    'Fruit_Beverages', 'Pastry', 'Sodas', 'Toiletries', 'Veggies', 
+                    'Wines', 'Frozen_Foods', 'Total_Profit']
 
     # 1. Product columns: Replace negative values with -1
     # Keeps the "loss" indicator without affecting the distribution too much
