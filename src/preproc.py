@@ -1,7 +1,12 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.impute import KNNImputer
 from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import DBSCAN
+from sklearn.decomposition import PCA
+from sklearn.neighbors import NearestNeighbors
+
 
 def walsmart_preproc(raw_data: pd.DataFrame) -> pd.DataFrame:
     '''
@@ -112,3 +117,63 @@ def walsmart_scaling(preproc_data:pd.DataFrame) -> pd.DataFrame:
     scaled_data[numeric_cols] = scaler.fit_transform(scaled_data[numeric_cols])
 
     return scaled_data
+
+
+def pca_dbscan_noise_removal(
+        scaled_data, preproc_data,
+        n_components=20, 
+        min_samples=20,
+        k_for_eps=10
+    ):
+    '''
+    Removes noise from the dataset using PCA for dimensionality reduction
+    followed by DBSCAN for noise detection
+    
+    Inputs:
+    - scaled_data: scaled dataset
+    - preproc_data: preprocessed dataset (before scaling)
+    - n_components: int/float, number of PCA components or variance ratio to keep
+    - eps: float, DBSCAN eps parameter
+    - min_samples: int, DBSCAN min_samples parameter
+
+    Outputs:
+    - scaled_data_clean: cleaned scaled dataset (noise removed)
+    - preproc_data_clean: cleaned preprocessed dataset (noise removed)
+
+    '''
+
+    # Remove ID column
+    X = scaled_data.drop(columns=['ID_Client'], errors='ignore')
+
+    # PCA
+    pca = PCA(n_components=n_components)
+    X_pca = pca.fit_transform(X)
+
+    print(f"Original dims: {X.shape[1]}")
+    print(f"PCA dims: {X_pca.shape[1]}")
+    print(f"Explained variance: {pca.explained_variance_ratio_.sum():.4f}")
+
+    # Estimate eps using k-distance
+    nbrs = NearestNeighbors(n_neighbors=k_for_eps).fit(X_pca)
+    distances, _ = nbrs.kneighbors(X_pca)
+    distances = np.sort(distances[:, -1])
+
+    # Knee point
+    eps = np.percentile(distances, 95)
+    print(f"Estimated eps (95th percentile): {eps:.4f}")
+
+    # DBSCAN
+    dbscan = DBSCAN(eps=eps, min_samples=min_samples)
+    labels = dbscan.fit_predict(X_pca)
+
+    noise_mask = labels == -1
+    n_noise = noise_mask.sum()
+    n_total = len(labels)
+
+    print(f"Noise detected: {n_noise} ({n_noise/n_total:.2%})")
+
+    # Clean data
+    scaled_clean = scaled_data[~noise_mask].reset_index(drop=True)
+    preproc_clean = preproc_data[~noise_mask].reset_index(drop=True)
+
+    return scaled_clean, preproc_clean
