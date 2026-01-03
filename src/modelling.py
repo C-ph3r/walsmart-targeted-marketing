@@ -69,7 +69,7 @@ def apply_pca(X, n_components=0.95):
     return X_pca, pca
 
 # 2. t-SNE visualization
-def apply_tsne(X_pca, labels=None, perplexity=30, n_components=2, figsize=(10, 8)):
+def plot_tsne(X_pca, labels=None, perplexity=30, n_components=2, figsize=(10, 8)):
     '''
     Apply t-SNE dimensionality reduction and produce a scatter plot for cluster visualization.
     
@@ -99,11 +99,6 @@ def apply_tsne(X_pca, labels=None, perplexity=30, n_components=2, figsize=(10, 8
                 X_tsne[mask, 0], X_tsne[mask, 1], 
                 c=labels[mask], cmap='tab10', s=20, alpha=0.7, label='Clusters'
             )
-            if mask.sum() < len(labels):
-                plt.scatter(
-                    X_tsne[~mask, 0], X_tsne[~mask, 1],
-                    c='gray', s=20, alpha=0.3, label='Noise'
-                )
             plt.colorbar(scatter, label='Cluster')
             plt.legend()
         else:
@@ -231,7 +226,7 @@ def optimize_pca_hdbscan(
     )
 
     # Compute t-SNE for visualization
-    X_tsne_full = apply_tsne(
+    X_tsne_full = plot_tsne(
         X_pca_full,
         labels=labels_full,
         perplexity=30,
